@@ -17,6 +17,7 @@ Develop a proxy service that translates OpenAI API requests to 0G Compute Networ
 - **Request Format**: OpenAI chat completions format
 - **Response Format**: OpenAI chat completions response
 - **Auth**: Bearer token in Authorization header
+- **Function Calling**: Full support for OpenAI tools/function calling API
 
 ## Technical Stack
 - **Runtime**: Node.js with TypeScript
@@ -98,6 +99,112 @@ Content-Type: application/json
   }
 }
 ```
+
+## Function Calling / Tools Support
+
+The proxy fully supports OpenAI's function calling API (tools). You can define functions that the model can call during the conversation.
+
+### Request with Tools
+```json
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {"role": "user", "content": "What's the weather in San Francisco?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the current weather in a given location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "The city and state, e.g. San Francisco, CA"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"]
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}
+```
+
+### Response with Tool Call
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "gpt-oss-120b",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_abc123",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"location\":\"San Francisco, CA\",\"unit\":\"fahrenheit\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }],
+  "usage": {
+    "prompt_tokens": 82,
+    "completion_tokens": 18,
+    "total_tokens": 100
+  }
+}
+```
+
+### Completing the Function Call
+After receiving a tool call, provide the result back to continue the conversation:
+
+```json
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {"role": "user", "content": "What's the weather in San Francisco?"},
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_abc123",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"location\":\"San Francisco, CA\",\"unit\":\"fahrenheit\"}"
+        }
+      }]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_abc123",
+      "name": "get_weather",
+      "content": "{\"temperature\": 72, \"unit\": \"fahrenheit\", \"description\": \"Sunny\"}"
+    }
+  ]
+}
+```
+
+### Supported Tool Features
+- ✅ Multiple tool definitions
+- ✅ Tool choice: `"auto"`, `"none"`, or specific function
+- ✅ Tool call responses in messages
+- ✅ Multiple tool calls in a single response
+- ✅ Full OpenAI tools API compatibility
 
 ## File Structure
 
@@ -193,7 +300,9 @@ Content-Type: application/json
 3. Test simple chat completion
 4. Test error scenarios
 5. Test with different models
-6. Integration test with real 0G network
+6. Test function calling / tools
+7. Test multi-turn conversations with tool calls
+8. Integration test with real 0G network
 
 ## Future Enhancements
 - Support for streaming responses (SSE)
