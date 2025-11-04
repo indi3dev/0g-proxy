@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "myprovider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "0G Proxy",
+      "options": {
+        "baseURL": "http://localhost:4000/v1",
+        "apiKey": "test-key",
+        "headers": {
+          "Authorization": "Bearer test-key"
+        }
+      },
+      "models": {
+        "0xf07240Efa67755B5311bc75784a061eDB47165Dd": {
+          "name": "phala/gpt-oss-120b"
+        }
+      }
+    }
+  }
+}
