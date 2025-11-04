@@ -69,6 +69,31 @@ export interface OpenAIChatResponse {
   };
 }
 
+// OpenAI Streaming Chunk
+export interface OpenAIStreamChunk {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    delta: {
+      role?: string;
+      content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: "function";
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
+    };
+    finish_reason: string | null;
+  }>;
+}
+
 // 0G Request Format
 export interface ZGChatRequest {
   messages: Array<{
@@ -81,6 +106,7 @@ export interface ZGChatRequest {
   model: string;
   temperature?: number;
   max_tokens?: number;
+  stream?: boolean;
   tools?: OpenAITool[];
   tool_choice?: "none" | "auto" | { type: "function"; function: { name: string } };
 }
@@ -123,6 +149,10 @@ export class Translator {
 
     if (openAIRequest.max_tokens !== undefined) {
       zgRequest.max_tokens = openAIRequest.max_tokens;
+    }
+
+    if (openAIRequest.stream !== undefined) {
+      zgRequest.stream = openAIRequest.stream;
     }
 
     if (openAIRequest.tools !== undefined) {
@@ -217,5 +247,82 @@ export class Translator {
    */
   private static generateId(): string {
     return crypto.randomBytes(16).toString("hex");
+  }
+
+  /**
+   * Convert streaming chunk from 0G to OpenAI format
+   */
+  static zgStreamChunkToOpenAI(
+    zgChunk: any,
+    model: string,
+    id: string,
+    created: number
+  ): OpenAIStreamChunk {
+    // Handle different possible chunk formats
+    let delta: any = {};
+    let finishReason: string | null = null;
+
+    if (zgChunk.choices && zgChunk.choices.length > 0) {
+      const choice = zgChunk.choices[0];
+      delta = choice.delta || {};
+      finishReason = choice.finish_reason || null;
+    } else if (zgChunk.delta) {
+      delta = zgChunk.delta;
+      finishReason = zgChunk.finish_reason || null;
+    } else if (zgChunk.content !== undefined) {
+      delta = { content: zgChunk.content };
+    } else if (typeof zgChunk === 'string') {
+      delta = { content: zgChunk };
+    }
+
+    return {
+      id: zgChunk.id || id,
+      object: "chat.completion.chunk",
+      created: zgChunk.created || created,
+      model: model,
+      choices: [
+        {
+          index: 0,
+          delta: delta,
+          finish_reason: finishReason,
+        },
+      ],
+    };
+  }
+
+  /**
+   * Parse SSE data line and extract JSON
+   */
+  static parseSSELine(line: string): any | null {
+    // SSE format: "data: {json}"
+    if (line.startsWith('data: ')) {
+      const data = line.substring(6).trim();
+
+      // Check for [DONE] marker
+      if (data === '[DONE]') {
+        return { done: true };
+      }
+
+      try {
+        return JSON.parse(data);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Format chunk as SSE string
+   */
+  static formatSSE(chunk: OpenAIStreamChunk): string {
+    return `data: ${JSON.stringify(chunk)}\n\n`;
+  }
+
+  /**
+   * Format done message as SSE string
+   */
+  static formatSSEDone(): string {
+    return `data: [DONE]\n\n`;
   }
 }

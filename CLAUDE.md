@@ -62,9 +62,12 @@ Content-Type: application/json
     {"role": "user", "content": "Hello"}
   ],
   "temperature": 0.7,
-  "max_tokens": 150
+  "max_tokens": 150,
+  "stream": false
 }
 ```
+
+For streaming responses, set `stream: true`.
 
 ### 2. Proxy Processing
 1. Validate auth token
@@ -253,11 +256,11 @@ After receiving a tool call, provide the result back to continue the conversatio
 - [ ] Implement response translation (0G → OpenAI)
 
 ### Phase 4: Error Handling & Features
-- [ ] Add comprehensive error handling
-- [ ] Implement balance checking
-- [ ] Add health check endpoint
-- [ ] Implement logging
-- [ ] Handle streaming responses (if needed)
+- [x] Add comprehensive error handling
+- [x] Implement balance checking
+- [x] Add health check endpoint
+- [x] Implement logging
+- [x] Handle streaming responses (SSE)
 
 ### Phase 5: Documentation
 - [ ] Create comprehensive README.md
@@ -304,8 +307,66 @@ After receiving a tool call, provide the result back to continue the conversatio
 7. Test multi-turn conversations with tool calls
 8. Integration test with real 0G network
 
+## Streaming Support
+
+The proxy fully supports Server-Sent Events (SSE) streaming for real-time response generation.
+
+### Enabling Streaming
+
+To enable streaming, set `stream: true` in your request:
+
+```json
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {"role": "user", "content": "Write a story about a robot"}
+  ],
+  "stream": true
+}
+```
+
+### Streaming Response Format
+
+The response will be sent as Server-Sent Events (SSE) with the following format:
+
+```
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"Once"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" upon"},"finish_reason":null}]}
+
+...
+
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+### Streaming with Tools
+
+Streaming also works with function calling. Tool calls will be streamed incrementally:
+
+```json
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {"role": "user", "content": "What's the weather in Paris?"}
+  ],
+  "tools": [...],
+  "stream": true
+}
+```
+
+Response chunks will include `delta.tool_calls` when the model is making function calls:
+
+```
+data: {"id":"chatcmpl-xyz","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz","object":"chat.completion.chunk","created":1234567890,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"location"}}]},"finish_reason":null}]}
+```
+
 ## Future Enhancements
-- Support for streaming responses (SSE)
 - Multiple auth tokens (multi-tenant)
 - Usage tracking and analytics
 - Rate limiting per token
