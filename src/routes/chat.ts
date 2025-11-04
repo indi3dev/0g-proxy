@@ -240,12 +240,162 @@ async function handleStreamingRequest(
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
 
   // Generate unique ID and timestamp for this completion
   const completionId = `chatcmpl-${crypto.randomBytes(16).toString("hex")}`;
   const created = Math.floor(Date.now() / 1000);
 
-  // Process the streaming response
+  // Check if provider returned streaming response or JSON
+  const contentType = response.headers.get("content-type") || "";
+  const isStreamingResponse = contentType.includes("text/event-stream") ||
+                              contentType.includes("stream");
+
+  // If provider doesn't support streaming, convert JSON response to stream
+  if (!isStreamingResponse) {
+    Logger.info("Provider returned non-streaming response, converting to stream");
+
+    try {
+      const zgResponse: any = await response.json();
+
+      // Send initial chunk with role
+      res.write(Translator.formatSSE({
+        id: completionId,
+        object: "chat.completion.chunk",
+        created: created,
+        model: model,
+        choices: [{
+          index: 0,
+          delta: { role: "assistant" },
+          finish_reason: null,
+        }],
+      }));
+
+      // Extract content from response
+      let content = "";
+      let toolCalls: any[] | undefined = undefined;
+      let finishReason = "stop";
+
+      if (zgResponse.choices && zgResponse.choices.length > 0) {
+        const choice = zgResponse.choices[0];
+        content = choice.message?.content || "";
+        toolCalls = choice.message?.tool_calls;
+        finishReason = choice.finish_reason || "stop";
+      }
+
+      // Stream content word by word for better UX
+      if (content) {
+        const words = content.split(/(\s+)/);
+        for (const word of words) {
+          if (word) {
+            res.write(Translator.formatSSE({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created: created,
+              model: model,
+              choices: [{
+                index: 0,
+                delta: { content: word },
+                finish_reason: null,
+              }],
+            }));
+          }
+        }
+      }
+
+      // Stream tool calls if present
+      if (toolCalls && toolCalls.length > 0) {
+        for (let i = 0; i < toolCalls.length; i++) {
+          const toolCall = toolCalls[i];
+
+          // Send tool call initialization
+          res.write(Translator.formatSSE({
+            id: completionId,
+            object: "chat.completion.chunk",
+            created: created,
+            model: model,
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: i,
+                  id: toolCall.id,
+                  type: toolCall.type,
+                  function: {
+                    name: toolCall.function.name,
+                    arguments: "",
+                  },
+                }],
+              },
+              finish_reason: null,
+            }],
+          }));
+
+          // Stream arguments
+          const args = toolCall.function.arguments;
+          if (args) {
+            res.write(Translator.formatSSE({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created: created,
+              model: model,
+              choices: [{
+                index: 0,
+                delta: {
+                  tool_calls: [{
+                    index: i,
+                    function: {
+                      arguments: args,
+                    },
+                  }],
+                },
+                finish_reason: null,
+              }],
+            }));
+          }
+        }
+
+        finishReason = "tool_calls";
+      }
+
+      // Send final chunk with finish_reason
+      res.write(Translator.formatSSE({
+        id: completionId,
+        object: "chat.completion.chunk",
+        created: created,
+        model: model,
+        choices: [{
+          index: 0,
+          delta: {},
+          finish_reason: finishReason,
+        }],
+      }));
+
+      res.write(Translator.formatSSEDone());
+      res.end();
+
+      Logger.info("Converted non-streaming response to stream successfully");
+      return;
+    } catch (error: any) {
+      Logger.error("Error converting non-streaming response:", error);
+      res.write(Translator.formatSSE({
+        id: completionId,
+        object: "chat.completion.chunk",
+        created: created,
+        model: model,
+        choices: [{
+          index: 0,
+          delta: {},
+          finish_reason: "error",
+        }],
+      }));
+      res.write(Translator.formatSSEDone());
+      res.end();
+      return;
+    }
+  }
+
+  // Process the streaming response from provider
   const reader = response.body;
   if (!reader) {
     Logger.error("Response body is null");

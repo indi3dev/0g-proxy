@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
-import { initializeBrokerManager } from './broker';
+import { initializeBrokerManager, getBrokerManager } from './broker';
 import { createAuthMiddleware } from './middleware/auth';
 import chatRouter from './routes/chat';
 import { Logger } from './utils/logger';
@@ -43,6 +43,22 @@ async function startServer() {
     // Create Express app
     const app = express();
 
+    // CORS middleware for web clients
+    app.use((req, res, next) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Max-Age', '86400');
+
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+
+      next();
+    });
+
     // Middleware
     app.use(express.json());
 
@@ -63,9 +79,44 @@ async function startServer() {
         description: 'OpenAI-compatible proxy for 0G Compute Network',
         endpoints: {
           health: 'GET /health',
+          models: 'GET /v1/models',
           chat: 'POST /v1/chat/completions',
         },
       });
+    });
+
+    // Models endpoint (OpenAI-compatible, with auth)
+    app.get('/v1/models', createAuthMiddleware(AUTH_TOKEN), async (req: Request, res: Response) => {
+      try {
+        const brokerManager = getBrokerManager();
+        const services = await brokerManager.getBroker().inference.listService();
+
+        const models = services.map((service: any, index: number) => ({
+          id: service.model || `model-${index}`,
+          object: 'model',
+          created: Math.floor(Date.now() / 1000),
+          owned_by: '0g-compute',
+          permission: [],
+          root: service.model || `model-${index}`,
+          parent: null,
+          // Additional 0G-specific metadata
+          provider: service.provider,
+        }));
+
+        res.json({
+          object: 'list',
+          data: models,
+        });
+      } catch (error: any) {
+        Logger.error('Error listing models:', error);
+        res.status(500).json({
+          error: {
+            message: error.message || 'Failed to list models',
+            type: 'internal_error',
+            code: 'model_list_error',
+          },
+        });
+      }
     });
 
     // API routes (with auth)

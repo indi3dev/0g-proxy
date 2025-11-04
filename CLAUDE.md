@@ -13,11 +13,15 @@ Develop a proxy service that translates OpenAI API requests to 0G Compute Networ
 5. **Authentication Middleware** - Simple token-based auth using Bearer tokens
 
 ### OpenAI API Compatibility
-- **Primary Endpoint**: `POST /v1/chat/completions`
+- **Chat Completions**: `POST /v1/chat/completions`
+- **List Models**: `GET /v1/models`
+- **Health Check**: `GET /health`
 - **Request Format**: OpenAI chat completions format
 - **Response Format**: OpenAI chat completions response
 - **Auth**: Bearer token in Authorization header
+- **Streaming**: Full SSE streaming support with automatic fallback
 - **Function Calling**: Full support for OpenAI tools/function calling API
+- **CORS**: Enabled for web clients
 
 ## Technical Stack
 - **Runtime**: Node.js with TypeScript
@@ -307,9 +311,56 @@ After receiving a tool call, provide the result back to continue the conversatio
 7. Test multi-turn conversations with tool calls
 8. Integration test with real 0G network
 
+## Connecting to Open WebUI and Other Clients
+
+The proxy is fully compatible with OpenAI-compatible clients like Open WebUI, Continue.dev, and others.
+
+### Open WebUI Setup
+
+1. **Install Open WebUI** (if not already installed):
+   ```bash
+   docker run -d -p 3001:8080 --name open-webui ghcr.io/open-webui/open-webui:main
+   ```
+
+2. **Access Open WebUI** at `http://localhost:3001`
+
+3. **Configure OpenAI Connection**:
+   - Go to Settings → Connections
+   - Set **API Base URL**: `http://localhost:3000/v1`
+   - Set **API Key**: Your `AUTH_TOKEN` from `.env`
+   - Click "Verify Connection"
+
+4. **Select Model**:
+   - The proxy automatically lists available models from 0G network
+   - Select any model from the dropdown (e.g., `gpt-oss-120b`, `deepseek-r1-70b`)
+
+5. **Start Chatting**:
+   - Streaming is enabled by default in Open WebUI
+   - Messages will stream in real-time from the 0G network
+
+### Features for Open WebUI Compatibility
+
+- ✅ **Automatic Streaming**: Even if 0G provider doesn't support streaming, the proxy converts responses to streaming format
+- ✅ **CORS Support**: Full CORS headers for web-based clients
+- ✅ **Model Discovery**: `/v1/models` endpoint lists all available 0G models
+- ✅ **OpenAI Format**: 100% compatible with OpenAI's API specification
+- ✅ **Word-by-Word Streaming**: Smooth streaming experience with word-level granularity
+
+### Note on Tool/Function Calling
+
+Open WebUI and similar clients may have limited support for OpenAI's function calling API. While the proxy fully supports tools/function calling, the client application needs to implement this feature. Most chat interfaces focus on conversational use cases and may not expose function calling capabilities.
+
 ## Streaming Support
 
 The proxy fully supports Server-Sent Events (SSE) streaming for real-time response generation.
+
+### Intelligent Streaming
+
+The proxy intelligently handles streaming:
+
+1. **Native Streaming**: If the 0G provider supports streaming, responses are forwarded directly
+2. **Fallback Streaming**: If the provider only returns JSON, the proxy automatically converts it to streaming format for better UX
+3. **Word-Level Granularity**: Non-streaming responses are split into words for smooth streaming experience
 
 ### Enabling Streaming
 
